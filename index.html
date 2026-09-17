@@ -218,8 +218,8 @@
 
                 // 3. Send data to Supabase
                 try {
-                    const SUPABASE_URL = 'https://YOUR-PROJECT-ID.supabase.co'; // https://waqbujfkoqhuixeahzta.supabase.co/rest/v1/signups
-                    const SUPABASE_KEY = 'YOUR-ANON-PUBLIC-KEY'; // eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndhcWJ1amZrb3FodWl4ZWFoenRhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk2NjUyMzksImV4cCI6MjEwNTI0MTIzOX0.slUkwBTlAIzYUAdTqbxs-6SPiq03AIXtWKuzAf-SxoE
+                    const SUPABASE_URL = 'https://waqbujfkoqhuixeahzta.supabase.co';
+                    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndhcWJ1amZrb3FodWl4ZWFoenRhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk2NjUyMzksImV4cCI6MjEwNTI0MTIzOX0.slUkwBTlAIzYUAdTqbxs-6SPiq03AIXtWKuzAf-SxoE';
                     const response = await fetch(`${SUPABASE_URL}/rest/v1/signups`, {
                         method: 'POST',
                         headers: {
