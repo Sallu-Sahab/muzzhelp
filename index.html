@@ -216,12 +216,19 @@
                         .map(([key, val]) => `${key}: ${val}`)
                         .join('<br>');
 
-                // 3. Send data to your storage endpoint
+                // 3. Send data to Supabase
                 try {
-                    // Replace with your actual storage endpoint
-                    const response = await fetch('YOUR_STORAGE_ENDPOINT', {
+                    const SUPABASE_URL = 'https://YOUR-PROJECT-ID.supabase.co'; // Paste your Project URL here
+                    const SUPABASE_KEY = 'YOUR-ANON-PUBLIC-KEY'; // Paste your anon key here
+
+                    const response = await fetch(`${SUPABASE_URL}/rest/v1/signups`, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'apikey': SUPABASE_KEY,
+                            'Authorization': `Bearer ${SUPABASE_KEY}`,
+                            'Prefer': 'return=minimal'
+                        },
                         body: JSON.stringify(userData)
                     });
 
@@ -229,12 +236,11 @@
                         showStatus('Account created successfully!', 'success');
                         form.reset();
                     } else {
-                        throw new Error('Storage request failed');
+                        throw new Error('Storage request failed with status ' + response.status);
                     }
                 } catch (error) {
-                    // For now, just show the data was collected
-                    showStatus('Data collected locally. Storage endpoint not configured yet.', 'info');
-                    console.log('Full user data:', userData);
+                    showStatus('Something went wrong saving your data. Please try again.', 'error');
+                    console.error('Supabase save error:', error);
                 }
 
                 submitBtn.disabled = false;
